@@ -159,7 +159,7 @@ class Dolphin(object):
                 self.memptrint = info.BaseAddress
                 bytesRead = ctypes.c_ulong(0)
                 print('regionSus located', hex(info.BaseAddress))
-                ctypes.windll.kernel32.ReadProcessMemory(m_hDolphin, self.memptr, self.mem2, 0x3800000, ctypes.byref(bytesRead))
+                ctypes.windll.kernel32.ReadProcessMemory(m_hDolphin, self.memptr, self.mem2, 0x4000000, ctypes.byref(bytesRead))
                 self.m_hdolphinSUS = m_hDolphin
                 if(self.mem2[:10] != b'\x02\x9f\x00\x10\x02\x9f\x003\x02\x9f'):
                     p += info.RegionSize
@@ -193,7 +193,7 @@ class Dolphin(object):
         if(offset >= 0x1<<28):
             offset -= 0x1<<28
             bytesRead = ctypes.c_ulong(0)
-            ctypes.windll.kernel32.ReadProcessMemory(self.m_hdolphinSUS, self.memptr, self.mem2, 0x3800000, ctypes.byref(bytesRead))
+            ctypes.windll.kernel32.ReadProcessMemory(self.m_hdolphinSUS, self.memptr, self.mem2, 0x4000000, ctypes.byref(bytesRead))
             return self.mem2[offset:offset+size]
         return self.memory.buf[offset:offset+size]
     
@@ -326,6 +326,14 @@ if __name__ == "__main__":
                 dolphin.write_uint32(0x807E5CA0, 1)
                 sussy = dolphin.read_uint32((dolphin.read_uint32(0x807D62A0)+0x0))-0x80000000
                 renderMain("SMG2 Player2", sussy)
+                cv2.waitKey(32)
+            except:
+                pass
+    elif xfbActive.gameId == "RMGE":
+        while True:
+            try:
+                sussy = dolphin.read_uint32((dolphin.read_uint32(0x806A2868)+0x0))-0x80000000
+                renderMain("SMG Player2", sussy)
                 cv2.waitKey(32)
             except:
                 pass
