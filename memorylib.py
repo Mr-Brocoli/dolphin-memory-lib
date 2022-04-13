@@ -116,7 +116,12 @@ SOFTWARE."""
 class Dolphin(object):
     def __init__(self):
         self.pid = -1
-        self.memory = None 
+        self.memory = None
+        #new
+        self.mem2 = ctypes.create_string_buffer(0x4000000)
+        self.memptr = ctypes.c_char_p(0)
+        self.memptrint = 0
+        self.m_hdolphinSUS = None
         
     def reset(self):
         self.pid = -1
@@ -140,7 +145,31 @@ class Dolphin(object):
                     if entry.th32ProcessID in skip_pids:
                         continue
                     if entry.szExeFile in (b"Dolphin.exe", b"DolphinQt2.exe", b"DolphinWx.exe"):
-                        self.pid = entry.th32ProcessID 
+                        self.pid = entry.th32ProcessID
+        #MEM2 READING AND WRITING MOMENT | I DON'T KNOW HOW THIS WORKS!
+        m_hDolphin = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_READ |PROCESS_VM_WRITE, False, self.pid);
+        info = MEMORY_BASIC_INFORMATION()
+        p = NULL
+        i = 0
+        while i < 5000:
+            ctypes.windll.kernel32.VirtualQueryEx(m_hDolphin, ctypes.c_wchar_p(p), ctypes.byref(info), ctypes.sizeof(info))
+            #print('regionSus', hex(info.RegionSize))
+            if info.RegionSize == 0x4000000:
+                self.memptr = ctypes.c_char_p(info.BaseAddress)
+                self.memptrint = info.BaseAddress
+                bytesRead = ctypes.c_ulong(0)
+                print('regionSus located', hex(info.BaseAddress))
+                ctypes.windll.kernel32.ReadProcessMemory(m_hDolphin, self.memptr, self.mem2, 0x3800000, ctypes.byref(bytesRead))
+                self.m_hdolphinSUS = m_hDolphin
+                if(self.mem2[:10] != b'\x02\x9f\x00\x10\x02\x9f\x003\x02\x9f'):
+                    p += info.RegionSize
+                    print("ohno")
+                    continue
+                print("amogus")
+                break
+            p += info.RegionSize
+            i += 1
+        #END OF MEM2 READING AND WRITING MOMENT
                     
             
         ctypes.windll.kernel32.CloseHandle(snapshot)
@@ -157,7 +186,15 @@ class Dolphin(object):
         except FileNotFoundError:
             return False
         
+    #def read_ram(self, offset, size):
+    #    return self.memory.buf[offset:offset+size]
+    #brocoli's new read_ram moment which is terrible
     def read_ram(self, offset, size):
+        if(offset >= 0x1<<28):
+            offset -= 0x1<<28
+            bytesRead = ctypes.c_ulong(0)
+            ctypes.windll.kernel32.ReadProcessMemory(self.m_hdolphinSUS, self.memptr, self.mem2, 0x3800000, ctypes.byref(bytesRead))
+            return self.mem2[offset:offset+size]
         return self.memory.buf[offset:offset+size]
     
     def write_ram(self, offset, data):
@@ -188,6 +225,14 @@ class Dolphin(object):
     for a in ctypes.__dict__:
         f.write(str(a))
         f.write("\n")"""
+
+class xfbInfo:
+    def __init__(self, gameId, width, height, xfbStarts, xfbSize):
+        self.gameId = gameId
+        self.width = width
+        self.height = height
+        self.xfbStarts = xfbStarts
+        self.xfbSize = xfbSize
         
 if __name__ == "__main__":
     dolphin = Dolphin()
@@ -215,6 +260,7 @@ if __name__ == "__main__":
     
     print("Testing Shared Memory Method")
     start = default_timer()
+    gameid = dolphin.read_uint32(0x80000000)
     count = 500000
     for i in range(count):
         value = randint(0, 2**32-1)
@@ -225,4 +271,67 @@ if __name__ == "__main__":
     diff = default_timer()-start 
     print(count/diff, "per sec")
     print("time: ", diff)
+    dolphin.write_uint32(0x80000000, gameid)
+    
+    #BROCOLI STUPID CODE STARTS HERE
+    import numpy as np
+    import cv2
+    import io
+    import asyncio
+    from PIL import ImageGrab
+    
+    xfbData = [xfbInfo('RMGE', 640, 456, [0, 0, 0], 0xa9600),
+               xfbInfo('SB4E', 640, 456, [0, 0, 0], 0xa9600),
+               xfbInfo('KB4E', 640, 456, [0, 0, 0], 0xa9600),
+              xfbInfo('GMSE', 640, 448, [0], 0xa5000),
+              xfbInfo('GQPE', 640, 456, [0], 0xf9600)]
+    xfbActive = None
+    for x in range(len(xfbData)):
+        sus = dolphin.read_ram(0, 0x4)
+        sus = chr(sus[0]) + chr(sus[1]) + chr(sus[2]) + chr(sus[3])
+        if sus == xfbData[x].gameId:
+            xfbActive = xfbData[x]
+            break
+    outputwidth = int((640)+640*0.5)
+    outputheight = int((456)+456*0.5)
+    def renderMain(windowName, xfbStartOverride=0, xfbVal=0, wOffset=0, hOffset=0):
+        if xfbStartOverride == 0:
+            xfbStartOverride = xfbActive.xfbStarts[xfbVal]
+        xfbRead = io.BytesIO(dolphin.read_ram(xfbStartOverride, xfbActive.xfbSize)) 
+            
+        frame_len = int((xfbActive.width + wOffset) * (xfbActive.height + hOffset) * 2)
+        shape = ((xfbActive.height + hOffset), (xfbActive.width + wOffset), 2)
+        raw = xfbRead.read(int(frame_len))
+        yuv = np.frombuffer(raw, dtype=np.uint8)
+        yuv = yuv.reshape(shape)
+        #yuv = cv2.resize(yuv, (0, 0), fx=0.5, fy=0.5)
+
+        cv2.namedWindow(windowName, cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
+        cv2.resizeWindow(windowName, outputwidth, outputheight)    
+        bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2RGB_YUY2)
+        
+        cv2.imwrite("amogus.jpg", bgr)
+        
+        cv2.imshow(windowName, bgr)
+    
+    xfbVal = 0
+    if xfbActive.gameId == "GMSE":
+        while True:
+            sussy = dolphin.read_uint32(dolphin.read_uint32((dolphin.read_uint32(0x803e9700)+0x1c))+4)-0x80000000
+            renderMain("SMS moment", sussy)
+            cv2.waitKey(32)
+    elif xfbActive.gameId == "SB4E" or xfbActive.gameId == "KB4E":
+        while True:
+            try:
+                dolphin.write_uint32(0x807E5CA0, 1)
+                sussy = dolphin.read_uint32((dolphin.read_uint32(0x807D62A0)+0x0))-0x80000000
+                renderMain("SMG2 Player2", sussy)
+                cv2.waitKey(32)
+            except:
+                pass
+    elif xfbActive.gameId == 'GQPE':
+        xfbActive.xfbStarts[0] = dolphin.read_uint32(0x803cbaf4)-0x80000000
+        while True:
+            renderMain("BFBB P2")
+            cv2.waitKey(32)
     
